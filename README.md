@@ -39,8 +39,8 @@ This is a classic **Snake Game** implemented using **Python** and **Pygame**. Th
 
 1. Clone the repository:
    ```bash
-   git clone <your-repository-url>
-   cd <your-repository-directory>
+   git clone https://github.com/felix-windsor/snake_game.git
+   cd snake_game
 2. Install the required dependencies:
    ```bash
    pip install pygame
