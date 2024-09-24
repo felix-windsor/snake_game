@@ -1,8 +1,9 @@
-import pygame  
+import pygame
 import random
 import json
 import os
 import logging
+import time
 
 # Set up logging
 logging.basicConfig(filename='snake_game.log', level=logging.DEBUG)
@@ -26,7 +27,7 @@ YELLOW = (255, 255, 0)
 
 # Snake and food properties
 block_size = 20
-initial_speed = 15
+initial_speed = 8
 snake_speed = initial_speed
 level = 1  # Add levels
 lives = 3  # Add lives
@@ -49,7 +50,18 @@ pygame.mixer.music.load(background_music)
 pygame.mixer.music.set_volume(0.5)
 pygame.mixer.music.play(-1)  # Loop the background music
 
-# Load and save high scores
+# Special food types
+special_food_types = {
+    "speed_up": {"color": YELLOW, "effect": "speed_up"},
+    "slow_down": {"color": BLUE, "effect": "slow_down"},
+    "add_life": {"color": (0, 255, 255), "effect": "add_life"},
+    "remove_life": {"color": (128, 0, 128), "effect": "remove_life"}
+}
+
+special_food_spawn_time = random.randint(10, 20)  # Time before spawning special food
+special_food_duration = 8  # How long the special food stays on screen
+
+
 def load_high_scores():
     try:
         if os.path.exists(high_scores_file):
@@ -74,8 +86,12 @@ def draw_snake(snake_list):
     for block in snake_list:
         pygame.draw.rect(window, GREEN, [block[0], block[1], block_size, block_size])
 
-def draw_food(food_pos):
-    pygame.draw.rect(window, RED, [food_pos[0], food_pos[1], block_size, block_size])
+def draw_food(food_pos, food_type="normal"):
+    if food_type == "normal":
+        pygame.draw.rect(window, RED, [food_pos[0], food_pos[1], block_size, block_size])
+    else:
+        # Draw special food with a unique color
+        pygame.draw.rect(window, special_food_types[food_type]["color"], [food_pos[0], food_pos[1], block_size, block_size])
 
 def display_score(score, level, lives):
     score_text = font.render(f"Score: {score}  Level: {level}  Lives: {lives}", True, WHITE)
@@ -166,26 +182,43 @@ def pause_game(score, level, lives):
 def game_loop():
     global snake_speed, level, lives
     game_over = False
+
+    # 初始化蛇的起始位置
     x1 = width // 2
     y1 = height // 2
     x1_change = block_size
     y1_change = 0
+
+    # 初始化蛇身
     snake_list = []
     snake_length = 1
+
+    # 初始化食物的位置
     food_x = round(random.randrange(0, width - block_size) / block_size) * block_size
     food_y = round(random.randrange(0, height - block_size) / block_size) * block_size
-    clock = pygame.time.Clock()
-    score = 0
-    obstacles = []  # List to hold obstacles
 
-    # Function to generate obstacles
+    # 初始化时钟
+    clock = pygame.time.Clock()
+
+    # 初始化分数和障碍物
+    score = 0
+    special_food_active = False
+    special_food_time = 0
+    special_food_pos = None
+    special_food_type = None
+    obstacles = []  # 用于保存障碍物的位置列表
+
+    # 生成障碍物的函数
     def generate_obstacles(level):
-        for _ in range(level):
+        obstacles.clear()  # 先清空旧的障碍物列表
+        while len(obstacles) < level:
             obs_x = round(random.randrange(0, width - block_size) / block_size) * block_size
             obs_y = round(random.randrange(0, height - block_size) / block_size) * block_size
-            obstacles.append([obs_x, obs_y])
+            # 确保障碍物不与蛇和食物重叠
+            if [obs_x, obs_y] not in snake_list and [obs_x, obs_y] != [food_x, food_y]:
+                obstacles.append([obs_x, obs_y])
 
-    generate_obstacles(level)  # Generate initial obstacles
+    generate_obstacles(level)  # 初始生成障碍物
 
     while not game_over:
         for event in pygame.event.get():
@@ -204,42 +237,71 @@ def game_loop():
                 elif event.key == pygame.K_DOWN and y1_change == 0:
                     y1_change = block_size
                     x1_change = 0
-                elif event.key == pygame.K_p:
+                elif event.key == pygame.K_p:  # 暂停功能
                     pause_game(score, level, lives)
 
-        # Check for boundaries
-        if x1 >= width or x1 < 0 or y1 >= height or y1 < 0 or [x1, y1] in obstacles:
+        # 更新蛇的坐标
+        x1 += x1_change
+        y1 += y1_change
+
+        # 碰撞检测逻辑：蛇如果超出边界，直接从另一侧出现
+        if x1 >= width:
+            x1 = 0
+        elif x1 < 0:
+            x1 = width - block_size
+        if y1 >= height:
+            y1 = 0
+        elif y1 < 0:
+            y1 = height - block_size
+
+        # 绘制背景
+        window.fill(BLACK)
+
+        # 绘制障碍物
+        for obs in obstacles:
+            pygame.draw.rect(window, (255, 165, 0), [obs[0], obs[1], block_size, block_size])
+
+        # 检查是否撞到障碍物
+        if [x1, y1] in obstacles:
             lives -= 1
             if lives == 0:
                 update_high_scores(score)
                 game_over = True
             else:
+                # 重新设置蛇的位置并重置部分状态
                 x1 = width // 2
                 y1 = height // 2
                 snake_list = []
                 snake_length = 1
                 snake_speed = initial_speed
+                generate_obstacles(level)  # 重新生成障碍物
 
-        x1 += x1_change
-        y1 += y1_change
-        window.fill(BLACK)
+        # 特殊食物生成逻辑
+        if not special_food_active and random.randint(1, 100) > 98:
+            special_food_type = random.choice(list(special_food_types.keys()))
+            special_food_pos = [round(random.randrange(0, width - block_size) / block_size) * block_size,
+                                round(random.randrange(0, height - block_size) / block_size) * block_size]
+            special_food_time = time.time()
+            special_food_active = True
 
-        # Draw obstacles
-        for obs in obstacles:
-            pygame.draw.rect(window, BLUE, [obs[0], obs[1], block_size, block_size])
-
-        while [food_x, food_y] in snake_list or [food_x, food_y] in obstacles:
-            food_x = round(random.randrange(0, width - block_size) / block_size) * block_size
-            food_y = round(random.randrange(0, height - block_size) / block_size) * block_size
-
+        # 绘制普通食物
         draw_food([food_x, food_y])
+
+        # 绘制特殊食物
+        if special_food_active:
+            draw_food(special_food_pos, special_food_type)
+            # 如果特殊食物的存在时间超过设定时长，则将其移除
+            if time.time() - special_food_time > special_food_duration:
+                special_food_active = False
+
+        # 更新蛇的身体
         snake_head = [x1, y1]
         snake_list.append(snake_head)
 
         if len(snake_list) > snake_length:
             del snake_list[0]
 
-        # Check for self-collision
+        # 检查蛇是否撞到自己
         for segment in snake_list[:-1]:
             if segment == snake_head:
                 lives -= 1
@@ -247,10 +309,13 @@ def game_loop():
                     update_high_scores(score)
                     game_over = True
 
+        # 绘制蛇
         draw_snake(snake_list)
         display_score(score, level, lives)
+
         pygame.display.update()
 
+        # 检查是否吃到普通食物
         if x1 == food_x and y1 == food_y:
             pygame.mixer.Sound.play(eat_sound)
             food_x = round(random.randrange(0, width - block_size) / block_size) * block_size
@@ -259,11 +324,26 @@ def game_loop():
             score += 1
             snake_speed += 1
 
-            if score % 5 == 0:  # Every 5 points increase level and difficulty
+            # 每5分增加一次等级，增加障碍物
+            if score % 5 == 0:
                 level += 1
-                generate_obstacles(level)
+                generate_obstacles(level)  # 每增加等级都生成新的障碍物
                 snake_speed += 2
 
+        # 检查是否吃到特殊食物
+        if special_food_active and x1 == special_food_pos[0] and y1 == special_food_pos[1]:
+            pygame.mixer.Sound.play(eat_sound)
+            if special_food_type == "speed_up":
+                snake_speed += 5  # 提高蛇的速度
+            elif special_food_type == "slow_down":
+                snake_speed = max(snake_speed - 5, 5)  # 减慢蛇的速度，但不会低于5
+            elif special_food_type == "add_life":
+                lives += 1  # 增加一条生命
+            elif special_food_type == "remove_life":
+                lives -= 1  # 减少一条生命
+            special_food_active = False  # 吃完特殊食物后移除
+
+        # 控制游戏速度
         clock.tick(snake_speed)
 
     return game_over_screen(score)
@@ -290,4 +370,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
